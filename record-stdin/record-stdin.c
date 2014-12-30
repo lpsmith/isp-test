@@ -8,9 +8,13 @@
 #include <time.h>
 #include <endian.h>
 
-#define BUFFER_SIZE 32756
-#define BUFFER_RESERVED 12
+#define BUFFER_SIZE 65526
+#define BUFFER_RESERVED 10
 #define WRITE_THRESHOLD 1024
+
+#define buffer_timestamp(x)  *((int64_t* )((x)     ))
+#define buffer_chunk_len(x)  *((uint16_t*)((x) +  8))
+#define buffer_chunk(x)       ((char*    )((x) + 10))
 
 static char buffer[BUFFER_RESERVED + BUFFER_SIZE];
 static char * rp;
@@ -19,7 +23,6 @@ static ssize_t left;
 static int
 write_buffer()
 {
-  ssize_t len = BUFFER_RESERVED + BUFFER_SIZE - left;
   int errsv;
   struct timespec tp;
   if (clock_gettime(CLOCK_REALTIME, &tp)) {
@@ -29,10 +32,12 @@ write_buffer()
     return -1;
   }
   // Convert to PostgreSQL time format
-  int64_t ts = ((int64_t)tp.tv_sec + 946684800) * 1000000
-             + ((int64_t)tp.tv_nsec / 1000);
-  *((uint64_t*)buffer) = htobe64((uint64_t)ts);
-  *((uint32_t*)(buffer + sizeof(int64_t))) = htobe32((uint32_t)len);
+  int64_t ts = (tp.tv_sec - 946684800) * 1000000
+             + (tp.tv_nsec / 1000);
+  buffer_timestamp(buffer) = htobe64(ts);
+  ssize_t chunk_len = BUFFER_SIZE - left;
+  buffer_chunk_len(buffer) = htobe16(chunk_len);
+  ssize_t len = chunk_len + BUFFER_RESERVED;
   char * wp = buffer;
   while (len > 0) {
     ssize_t retval = write(STDOUT_FILENO, wp, len);
@@ -52,7 +57,7 @@ write_buffer()
       len -= retval;
     }
   }
-  rp = buffer + BUFFER_RESERVED;
+  rp = buffer_chunk(buffer);
   left = BUFFER_SIZE;
   return 0;
 }
